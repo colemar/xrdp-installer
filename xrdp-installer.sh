@@ -6,7 +6,7 @@
 # Date : Janvier 2025
 # written by : Griffon
 # WebSite :http://www.c-nergy.be - http://www.c-nergy.be/blog
-# Version : 1.5.4
+# Version : 1.5.4c - adapted by colemar
 # History : 1.5.4 - adding support to H264 encoding/decoding protocol
 #                 - Remove support Ubuntu 20.04 (EOL July 2025)
 #                 - Adding Support Ubuntu 25.04  
@@ -130,7 +130,7 @@
 #---------------------------------------------------#
 
 #--Automating Script versioning 
-ScriptVer="1.5.4"
+ScriptVer="1.5.4c"
 
 #---------------------------------------------------#
 # Variables and Constants                           #
@@ -723,34 +723,61 @@ chkPkv=$(pkaction --version |  awk '{print $3}')
 if [[ "$chkPkv" > "0.106"  ]]
 then 
     /bin/echo -e "\e[1;32m       |-|  New Polkit version in used in Ubuntu 23.10 and later     \e[0m"
-    /bin/echo -e "\e[1;32m       |-|  Work in progress...     \e[0m"
+    /bin/echo -e "\e[1;32m       |-|  Creating unified polkit rules...     \e[0m"
 
-#--create flatpak polkit exception even if flatpak not installed
-
-sudo bash -c "cat >/etc/polkit-1/rules.d/48-allow-flatpak.rules" <<EOF
-/* Allow system refresh without authentication xRDP Session */
+#-- Create unified polkit rules for xRDP sessions
+sudo bash -c "cat >/etc/polkit-1/rules.d/50-xrdp-complete.rules" <<EOF
+/* Complete Polkit rules for xRDP sessions */
 polkit.addRule(function(action, subject) {
-if (action.id = "org.freedesktop.Flatpak.modify-repo" &&
-subject.isInGroup("sudo")) {
-return polkit.Result.YES;
-}
-});
-EOF
-
-#-- KDE Desktop Specific  - can be detected only at run time of the script 
-if [ "$DesktopVer" = "KDE" ];
-then
-sudo bash -c "cat >/etc/polkit-1/rules.d/49-allow-KDE-Power.rules" <<EOF
-/* Allow poweroff Control in xRDP Session for KDE mainly */
-
-polkit.addRule(function(action, subject) {
-  polkit.log(action + ", " + subject);
-  if (~["org.freedesktop.login1.power-off","org.freedesktop.login1.power-off-multiple-sessions","org.freedesktop.login1.reboot","org.freedesktop.login1.reboot-multiple-sessions"].indexOf(action.id)) {
-    return polkit.Result.YES;
+  if (subject.isInGroup("sudo")) {
+    
+    // === System power management ===
+    // KDE and other desktops - allow reboot/poweroff, always ask for password
+    if (action.id.indexOf("org.freedesktop.login1.power-off") === 0 ||
+        action.id.indexOf("org.freedesktop.login1.reboot") === 0) {
+      return polkit.Result.AUTH_ADMIN;
+    }
+    
+    // === System settings - require password with 5min timeout ===
+    // Date, time and timezone
+    if (action.id.indexOf("org.freedesktop.timedate1.") === 0) {
+      return polkit.Result.AUTH_ADMIN_KEEP;
+    }
+    
+    // Hostname
+    if (action.id.indexOf("org.freedesktop.hostname1.") === 0) {
+      return polkit.Result.AUTH_ADMIN_KEEP;
+    }
+    
+    // Locale settings
+    if (action.id.indexOf("org.freedesktop.locale1.") === 0) {
+      return polkit.Result.AUTH_ADMIN_KEEP;
+    }
+    
+    // Network management
+    if (action.id == "org.freedesktop.NetworkManager.network-control") {
+      return polkit.Result.AUTH_ADMIN_KEEP;
+    }
+    
+    // === Low-risk actions - allow without password ===
+    // Color Manager
+    if (action.id.indexOf("org.freedesktop.color-manager.") === 0) {
+      return polkit.Result.YES;
+    }
+    
+    // Package repository refresh
+    if (action.id == "org.freedesktop.packagekit.system-sources-refresh" ||
+        action.id == "org.freedesktop.packagekit.system-network-proxy-configure") {
+      return polkit.Result.YES;
+    }
+    
+    // Flatpak repository management
+    if (action.id == "org.freedesktop.Flatpak.modify-repo") {
+      return polkit.Result.YES;
+    }
   }
 });
 EOF
-fi
 
 else
 
